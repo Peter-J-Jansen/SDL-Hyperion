@@ -1,5 +1,5 @@
 /* HEXTERNS.H   (C) Copyright Roger Bowler, 1999-2012                */
-/*              (C) and others 2013-2023                             */
+/*              (C) and others 2013-2024                             */
 /*                    Hercules function prototypes...                */
 /*                                                                   */
 /*   Released under "The Q Public License Version 1"                 */
@@ -274,6 +274,11 @@ int servc_hresume(void *file);
 
 #if defined( _FEATURE_073_TRANSACT_EXEC_FACILITY )
 /* Functions in module transact.c */
+TRANS_DLL_IMPORT void txf_backout_abort_cache_lines( REGS*             regs,
+                                                     TXF_BACKOUT_ABORT abort);
+TRANS_DLL_IMPORT void txf_backout_nontransactional_access_check( BYTE*        maddr,
+                                                                 const size_t len, 
+                                                                 bool         store );                                                                                                              
 TRANS_DLL_IMPORT BYTE* txf_maddr_l( const U64  vaddr,   const size_t  len,
                                     const int  arn,     REGS*         regs,
                                     const int  acctype, BYTE*         maddr );
