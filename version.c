@@ -693,6 +693,23 @@ static const char *build_info[] = {
 
 #if defined( _FEATURE_073_TRANSACT_EXEC_FACILITY )
     "With    Transactional-Execution Facility support",
+
+#if defined( TXF_COMMIT_METHOD ) 
+    "With    TXF_COMMIT_METHOD",
+#else
+    "Without TXF_COMMIT_METHOD",
+#endif
+#if defined( TXF_BACKOUT_METHOD ) 
+    "With    TXF_BACKOUT_METHOD",
+#else
+    "Without TXF_BACKOUT_METHOD",
+#endif
+#if defined( TXF_NO_CHECKS ) 
+    "With    TXF_NO_CHECKS",
+#else
+    "Without TXF_NO_CHECKS",
+#endif
+
 #else
     "Without Transactional-Execution Facility support",
 #endif
