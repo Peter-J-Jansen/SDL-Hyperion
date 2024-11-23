@@ -1,5 +1,5 @@
 /* CONFIG.C     (C) Copyright Jan Jaeger, 2000-2012                  */
-/*              (C) and others 2013-2023                             */
+/*              (C) and others 2013-2024                             */
 /*              Device and Storage configuration functions           */
 /*                                                                   */
 /*   Released under "The Q Public License Version 1"                 */
@@ -305,6 +305,18 @@ int configure_storage( U64 mainsize /* number of 4K pages */ )
 
     /* Add number of pages needed for our storage key array */
     storsize += skeysize;
+
+#if defined( _FEATURE_073_TRANSACT_EXEC_FACILITY )
+  #if defined( TXF_BACKOUT_METHOD )
+    /*
+     * The TXF_BACKOUT_METHOD requires 2 bytes of status for each
+     * TXF cache line.  Each 4K page mainstor is 16 cache lines of
+     * 256 bytes, thus needing 32 bytes of TXF cache line status.
+     * 4K bytes of TXF cache line status supports 128 mainsize pages.
+     */
+    storsize += ( mainsize + 128 - 1 ) >> 7;   
+  #endif /* defined( TXF_BACKOUT_METHOD ) */
+#endif /* defined( _FEATURE_073_TRANSACT_EXEC_FACILITY ) */
 
     /* New memory is obtained only if the requested and calculated size
      * is larger than the last allocated size, or if the request is for
