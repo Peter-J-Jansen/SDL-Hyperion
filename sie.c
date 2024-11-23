@@ -1,5 +1,5 @@
 /* SIE.C        (C) Copyright Jan Jaeger, 1999-2012                  */
-/*              (C) and others 2013-2021                             */
+/*              (C) and others 2013-2024                             */
 /*              Interpretive Execution                               */
 /*                                                                   */
 /*   Released under "The Q Public License Version 1"                 */
@@ -1529,12 +1529,18 @@ void ARCH_DEP( sie_exit )( REGS* regs, int icode )
 
     PTT_TXF( "TXF itdb", itdba, 0, 0 );
 
+#if !defined( TXF_BACKOUT_METHOD )
+    // OBTAIN/RELEASE_TXFLOCK is superfluous.
     OBTAIN_TXFLOCK( GUESTREGS );
     {
+#endif /* !defined( TXF_BACKOUT_METHOD ) */
         txf_tnd     = GUESTREGS->txf_tnd;
         txf_contran = GUESTREGS->txf_contran;
+#if !defined( TXF_BACKOUT_METHOD )
+    // OBTAIN/RELEASE_TXFLOCK is superfluous.
     }
     RELEASE_TXFLOCK( GUESTREGS );
+#endif /* !defined( TXF_BACKOUT_METHOD ) */
 
     PTT_TXF( "TXF tnd,con", txf_tnd, txf_contran, 0 );
 
