@@ -444,8 +444,10 @@ struct REGS {                           /* Processor registers       */
                                            aborted due to TAC_UPGM   */
         int     txf_aborts;             /* Abort count               */
         S32     txf_PPA;                /* PPA assistance level      */
+#if !defined( TXF_BACKOUT_METHOD )
         BYTE    txf_tnd;                /* Transaction nesting depth.
                                            Use txf_lock to access!   */
+#endif /* !defined( TXF_BACKOUT_METHOD ) */
 
         BYTE    txf_ctlflag;            /* Flags for access mode
                                            change, float allowed     */
@@ -497,11 +499,42 @@ struct REGS {                           /* Processor registers       */
         TPAGEMAP  txf_pagesmap[ MAX_TXF_PAGES ]; /* Page addresses   */
         int       txf_pgcnt;            /* Entries in TPAGEMAP table */
 
+#if defined( TXF_BACKOUT_METHOD )
+        TXF_BACKOUT_CACHE_LINES
+                txf_backout_cache_lines[ TXF_BACKOUT_CACHE_LINES_MAX ];
+#define TXF_CACHE_LINE_LOCK 0x8000      /* lock bit in _lines_count: */                
+        U16     txf_backout_cache_lines_count;   /* Entries in it    */
+        short   txf_backout_tac;        /* Access Conflict Abort Code*/
+#endif /* defined( TXF_BACKOUT_METHOD ) */
+
         BYTE    txf_gprmask;            /* GPR register restore mask */
         DW      txf_savedgr[16];        /* Saved gpr register values */
 
+#if !defined( TXF_BACKOUT_METHOD )
         int     txf_tac;                /* Transaction abort code.
                                            Use txf_lock to access!   */
+#else
+
+        union   
+        {                               /* supports atomic updates : */
+            U32    txf_tac_tnd;         /* atomic_update32( ...,+1 ) */
+  #define TXF_TAC_SHIFT  16             /* Endianness independent    */         
+  #define TXF_TND_MASK   0xFF           /* Endianness independent    */  
+            struct                      /* to avoid using txf_lock   */
+            {
+  #if !defined( WORDS_BIGENDIAN )
+                BYTE   txf_tnd;         /* Transaction nesting depth */
+                BYTE   __padding;       /* Always 0                  */
+                short  txf_tac;         /* Transaction abort code    */             
+  #else  /* defined( WORDS_BIGENDIAN )     E.g. on an s390x host     */
+                short  txf_tac;         /* Transaction abort code    */
+                BYTE   __padding;       /* Always 0                  */
+                BYTE   txf_tnd;         /* Transaction nesting depth */                        
+  #endif /* defined( WORDS_BIGENDIAN )                               */
+            };
+        };
+
+#endif /* defined( TXF_BACKOUT_METHOD ) */
 
         int     txf_random_tac;         /* Random abort code         */
 
@@ -744,11 +777,13 @@ struct SYSBLK {
 
         /* Transactional-Execution Facility locks                    */
 
+#if !defined( TXF_BACKOUT_METHOD )
         LOCK    txf_lock[ MAX_CPU_ENGS ]; /* CPU transaction lock for
                                              txf_tnd/txf_tac access  */
 
 #define OBTAIN_TXFLOCK( regs )    obtain_lock ( &sysblk.txf_lock[ (regs)->cpuad ])
 #define RELEASE_TXFLOCK( regs )   release_lock( &sysblk.txf_lock[ (regs)->cpuad ])
+#endif /* !defined( TXF_BACKOUT_METHOD ) */
 
         // PROGRAMMING NOTE: we purposely define the below count
         // as a signed value (rather than unsigned) so that we can
@@ -795,6 +830,21 @@ struct SYSBLK {
 atomic_update64( &sysblk.txf_stats[ contran ? 1 : 0 ].txf_ ## ctr, +1 )
 
 #define TXF_CONSTRAINED( contran ) (contran ? "CONSTRAINED" : "UNconstrained" )
+
+#if defined( TXF_BACKOUT_METHOD )
+
+        BYTE   *txf_cache_line_maddr_lo;/* lowest cache line in use  */
+        BYTE   *txf_cache_line_maddr_hi;/* highest cache line in use */                                 
+        U16    *txf_cache_line_status;  /* 2 bytes per cache line of */
+                                        /* 256 byetes each holding:  */                                       
+#define TXF_CACHE_LINE_NOT_USED 0x0000  /* - cache line initially    */
+#define TXF_CACHE_LINE_CPU_MASK 0x3FFF  /* - transaction CPU         */ 
+#define TXF_CACHE_LINE_STORED   0x4000  /* - cache line was stored   */
+                                        /*   (possibly also fetched) */  
+#define TXF_CACHE_LINE_FETCHED  0x8000  /* - cache line was fecthed  */
+                                        /*   but NOT stored          */ 
+
+#endif /* defined( TXF_BACKOUT_METHOD ) */
 
 #endif /* defined( _FEATURE_073_TRANSACT_EXEC_FACILITY ) */
 
@@ -1999,5 +2049,17 @@ struct GUISTAT
     char    szStatStrBuff1[GUI_STATSTR_BUFSIZ];
     char    szStatStrBuff2[GUI_STATSTR_BUFSIZ];
 };
+
+/*-------------------------------------------------------------------*/
+/* TXF backout abort types                                           */
+/*-------------------------------------------------------------------*/
+typedef enum
+{
+    TXF_BACKOUT_ABORT_NONE       = 0,
+    TXF_BACKOUT_ABORT_DELAYED    = 1,
+    TXF_BACKOUT_ABORT_IMMEDIATE  = 2,
+    TXF_BACKOUT_ABORT_RESET_ONLY = 3
+}
+TXF_BACKOUT_ABORT;
 
 #endif // _HSTRUCTS_H

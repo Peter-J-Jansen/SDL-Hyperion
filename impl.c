@@ -1,5 +1,5 @@
 /* IMPL.C       (C) Copyright Roger Bowler, 1999-2012                */
-/*              (C) and others 2013-2023                             */
+/*              (C) and others 2013-2024                             */
 /*              Hercules Initialization Module                       */
 /*                                                                   */
 /*   Released under "The Q Public License Version 1"                 */
@@ -1205,9 +1205,11 @@ int     rc, maxprio, minprio;
             set_lock_name(   &sysblk.cpulock[i], buf );
 
 #if defined( _FEATURE_073_TRANSACT_EXEC_FACILITY )
+#if !defined( TXF_BACKOUT_METHOD )
             MSGBUF( buf,    "&sysblk.txf_lock[%*d]", MAX_CPU_ENGS > 99 ? 3 : 2, i );
             initialize_lock( &sysblk.txf_lock[i] );
             set_lock_name(   &sysblk.txf_lock[i], buf );
+#endif /* !defined( TXF_BACKOUT_METHOD ) */            
 #endif
         }
     }
