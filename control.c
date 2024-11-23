@@ -1860,6 +1860,14 @@ bool    do_range = false;               /* helper flag               */
 #if defined( FEATURE_073_TRANSACT_EXEC_FACILITY )
         /* Abort any/all active transactions beforehand */
         if (FACILITY_ENABLED( 073_TRANSACT_EXEC, regs ))
+#if defined( TXF_BACKOUT_METHOD )
+            // Only abort transactions that can possible be affected by the IPTE instruction
+            if (   sysblk.txf_cache_line_maddr_hi >= (BYTE*) 
+                   ( (pto & ZSEGTAB_PTO) + ((vaddr & 0x000FF000) >> (PAGEFRAME_PAGESHIFT-3)) )
+                && sysblk.txf_cache_line_maddr_lo <= (BYTE*) 
+                   ( (pto & ZSEGTAB_PTO) + ((vaddr & 0x000FF000) >> (PAGEFRAME_PAGESHIFT-3))
+                      + ( pages << SHIFT_4K ) ) )                        
+#endif /* defined( TXF_BACKOUT_METHOD ) */        
             txf_abort_all( regs->cpuad, TXF_WHY_IPTE_INSTR, PTT_LOC );
 #endif
         /* Now invalidate all of the requested Page Table Entries */

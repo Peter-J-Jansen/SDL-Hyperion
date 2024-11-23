@@ -1,5 +1,5 @@
 /* ESAME.C      (C) Copyright Jan Jaeger, 2000-2012                  */
-/*              (C) and others 2013-2021                             */
+/*              (C) and others 2013-2024                             */
 /*              ESAME (z/Architecture) instructions                  */
 /*                                                                   */
 /*   Released under "The Q Public License Version 1"                 */
@@ -3598,7 +3598,7 @@ bool    overflow;                       /* true if overflow          */
     /* Use rightmost six bits of operand address as shift count */
     if ((shift_amt = effective_addr2 & 0x3F) != 0)
     {
-        /* Load the numeric and sign portions from the R3 register */
+    /* Load the numeric and sign portions from the R3 register */
         sign_bit     = regs->GR_G(r3) & 0x8000000000000000ULL;
         numeric_bits = regs->GR_G(r3) & 0x7FFFFFFFFFFFFFFFULL;
 
@@ -3610,17 +3610,17 @@ bool    overflow;                       /* true if overflow          */
         numeric_bits <<= shift_amt;
         numeric_bits &= 0x7FFFFFFFFFFFFFFFULL;
 
-        /* Load the updated value into the R1 register */
+    /* Load the updated value into the R1 register */
         regs->GR_G(r1) = sign_bit | numeric_bits;
 
-        /* Condition code 3 and program check if overflow occurred */
+    /* Condition code 3 and program check if overflow occurred */
         if (overflow)
-        {
-            regs->psw.cc = 3;
+    {
+        regs->psw.cc = 3;
             if (FOMASK( &regs->psw ))
                 regs->program_interrupt( regs, PGM_FIXED_POINT_OVERFLOW_EXCEPTION );
-            return;
-        }
+        return;
+    }
     }
     else
         regs->GR_G(r1) = regs->GR_G(r3);
@@ -6113,6 +6113,11 @@ bool    multi_block = false;            /* Work (simplifies things)  */
     /* TXF Key Quiescing support */
     if (quiesce)
     {
+#if defined( TXF_BACKOUT_METHOD )
+        // Only abort transactions that can possible be affected by the PFMF instruction
+        if (   sysblk.txf_cache_line_maddr_hi >= (BYTE*)  pageaddr 
+            && sysblk.txf_cache_line_maddr_lo <= (BYTE*) (pageaddr + ( fc << SHIFT_4K ) ) )
+#endif /* defined( TXF_BACKOUT_METHOD ) */         
         txf_abort_all( regs->cpuad, TXF_WHY_STORKEY, PTT_LOC );
         RELEASE_INTLOCK( regs );
     }
