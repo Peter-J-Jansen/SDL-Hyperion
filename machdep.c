@@ -1,5 +1,5 @@
 /* MACHDEP.C    (C) Copyright Greg Smith, 2001-2012                  */
-/*              (C) and others 2013-2023                             */
+/*              (C) and others 2013-2024                             */
 /*              Hercules machine specific code                       */
 /*                                                                   */
 /*   Released under "The Q Public License Version 1"                 */
@@ -14,7 +14,7 @@
 /*                                                                   */
 /*   Atomic COMPARE-AND-EXCHANGE functions:                          */
 /*                                                                   */
-/*         cmpxchg1, cmpxchg4, cmpxchg8, cmpxchg16                   */
+/*         cmpxchg1, cmpxchg2, cmpxchg4, cmpxchg8, cmpxchg16         */
 /*                                                                   */
 /*   Atomic half, full and doubleword fetch/store functions:         */
 /*                                                                   */
@@ -57,6 +57,7 @@
 #undef MSC_X86_IA64
 
 #undef cmpxchg1
+#undef cmpxchg2
 #undef cmpxchg4
 #undef cmpxchg8
 #undef cmpxchg16
@@ -66,6 +67,7 @@
 #undef _ext_ppc
 
 #undef ASSIST_CMPXCHG1
+#undef ASSIST_CMPXCHG2
 #undef ASSIST_CMPXCHG4
 #undef ASSIST_CMPXCHG8
 #undef ASSIST_CMPXCHG16
@@ -158,6 +160,7 @@
     #pragma  intrinsic  ( _InterlockedCompareExchange )
 
     #define  cmpxchg1(  x, y, z )  cmpxchg1_x86( x, y, z )
+    #define  cmpxchg2(  x, y, z )  cmpxchg2_x86( x, y, z )
     #define  cmpxchg4(  x, y, z )  cmpxchg4_x86( x, y, z )
     #define  cmpxchg8(  x, y, z )  cmpxchg8_x86( x, y, z )
 
@@ -165,6 +168,7 @@
 
     extern inline BYTE __fastcall cmpxchg8_x86 ( U64* old, U64 unew, volatile void* ptr );
     extern inline BYTE __fastcall cmpxchg4_x86 ( U32* old, U32 unew, volatile void* ptr );
+    extern inline BYTE __fastcall cmpxchg2_x86 ( U16* old, U16 unew, volatile void* ptr );
 
     // (must follow cmpxchg4 since it uses it)
     extern inline BYTE __fastcall cmpxchg1_x86 ( BYTE* old, BYTE unew, volatile void* ptr );
@@ -263,6 +267,9 @@
 #define cmpxchg1(x,y,z) cmpxchg1_i686(x,y,z)
 extern inline BYTE cmpxchg1_i686(BYTE *old, BYTE new, void *ptr);
 
+#define cmpxchg2(x,y,z) cmpxchg2_i686(x,y,z)
+extern inline BYTE cmpxchg2_i686(U16 *old, U16 new, void *ptr);
+
 #define cmpxchg4(x,y,z) cmpxchg4_i686(x,y,z)
 extern inline BYTE cmpxchg4_i686(U32 *old, U32 new, void *ptr);
 
@@ -284,6 +291,9 @@ extern inline void store_dw_i686_noswap(void *ptr, U64 value);
 
 #define cmpxchg1(x,y,z) cmpxchg1_amd64(x,y,z)
 extern inline BYTE cmpxchg1_amd64(BYTE *old, BYTE new, void *ptr);
+
+#define cmpxchg2(x,y,z) cmpxchg2_amd64(x,y,z)
+extern inline BYTE cmpxchg2_amd64(U16 *old, U16 new, void *ptr);
 
 #define cmpxchg4(x,y,z) cmpxchg4_amd64(x,y,z)
 extern inline BYTE cmpxchg4_amd64(U32 *old, U32 new, void *ptr);
@@ -367,6 +377,14 @@ extern inline int cmpxchg16_aarch64(U64 *old1, U64 *old2, U64 new1, U64 new2, vo
 extern inline BYTE cmpxchg1_C11(BYTE *old, BYTE new, volatile void *ptr);
 #endif
 
+#if defined( cmpxchg2 ) && !defined( C11_ATOMICS_ASSISTS_NOT_PREFERRED )
+  #undef cmpxchg2
+#endif
+#ifndef cmpxchg2
+#define cmpxchg2(x,y,z) cmpxchg2_C11(x,y,z)
+extern inline BYTE cmpxchg2_C11(U16 *old, U16 new, volatile void *ptr);
+#endif
+
 #if defined( cmpxchg4 ) && !defined( C11_ATOMICS_ASSISTS_NOT_PREFERRED )
   #undef cmpxchg4
 #endif
@@ -392,6 +410,10 @@ extern inline BYTE cmpxchg8_C11(U64 *old, U64 new, volatile void *ptr);
  *-------------------------------------------------------------------*/
 #if defined(cmpxchg1)
  #define ASSIST_CMPXCHG1
+#endif
+
+#if defined(cmpxchg2)
+ #define ASSIST_CMPXCHG2
 #endif
 
 #if defined(cmpxchg4)
@@ -423,6 +445,7 @@ extern inline BYTE cmpxchg8_C11(U64 *old, U64 new, volatile void *ptr);
 #if (! defined( MAINLOCK_ALWAYS )) \
     && defined( H_ATOMIC_OP )      \
     && defined( cmpxchg1 )         \
+    && defined( cmpxchg2 )         \
     && defined( cmpxchg4 )         \
     && defined( cmpxchg8 )         \
     && defined( cmpxchg16 )
@@ -577,6 +600,13 @@ extern inline BYTE cmpxchg8_C11(U64 *old, U64 new, volatile void *ptr);
  *-------------------------------------------------------------------*/
 #ifndef cmpxchg1
 extern inline BYTE cmpxchg1(BYTE *old, BYTE new, volatile void *ptr);
+#endif
+
+/*-------------------------------------------------------------------
+ * cmpxchg2
+ *-------------------------------------------------------------------*/
+#ifndef cmpxchg2
+extern inline BYTE cmpxchg2(U16 *old, U16 new, volatile void *ptr);
 #endif
 
 /*-------------------------------------------------------------------

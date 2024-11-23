@@ -1,5 +1,5 @@
 /* MACHDEP.H    (C) Copyright Greg Smith, 2001-2012                  */
-/*              (C) and others 2013-2023                             */
+/*              (C) and others 2013-2024                             */
 /*              Hercules machine specific code                       */
 /*                                                                   */
 /*   Released under "The Q Public License Version 1"                 */
@@ -14,7 +14,7 @@
 /*                                                                   */
 /*   Atomic COMPARE-AND-EXCHANGE functions:                          */
 /*                                                                   */
-/*         cmpxchg1, cmpxchg4, cmpxchg8, cmpxchg16                   */
+/*         cmpxchg1, cmpxchg2, cmpxchg4, cmpxchg8, cmpxchg16         */
 /*                                                                   */
 /*   Atomic half, full and doubleword fetch/store functions:         */
 /*                                                                   */
@@ -90,6 +90,7 @@
     #pragma  intrinsic  ( _InterlockedCompareExchange )
 
     #define  cmpxchg1(  x, y, z )  cmpxchg1_x86( x, y, z )
+    #define  cmpxchg2(  x, y, z )  cmpxchg2_x86( x, y, z )
     #define  cmpxchg4(  x, y, z )  cmpxchg4_x86( x, y, z )
     #define  cmpxchg8(  x, y, z )  cmpxchg8_x86( x, y, z )
 
@@ -109,6 +110,13 @@
         *old = _InterlockedCompareExchange( ptr, unew, *old );
         return ((tmp == *old) ? 0 : 1);
     }
+    inline BYTE __fastcall cmpxchg2_x86 ( U16* old, U16 unew, volatile void* ptr )
+    {
+        // returns 0 == success, 1 otherwise
+        U16 tmp = *old;
+        *old = _InterlockedCompareExchange( ptr, unew, *old );
+        return ((tmp == *old) ? 0 : 1);
+    }    
 
     // (must follow cmpxchg4 since it uses it)
     inline BYTE __fastcall cmpxchg1_x86 ( BYTE* old, BYTE unew, volatile void* ptr )
@@ -281,6 +289,20 @@ inline BYTE cmpxchg1_i686(BYTE *old, BYTE new, void *ptr) {
  return code;
 }
 
+#define cmpxchg2(x,y,z) cmpxchg2_i686(x,y,z)
+inline BYTE cmpxchg2_i686(U16 *old, U16 new, void *ptr) {
+ BYTE code;
+ __asm__ __volatile__ (
+         "lock; cmpxchgw %w3,%4\n\t"
+         "setnz   %b0"
+         : "=q"(code), "=a"(*old)
+         : "1" (*old),
+           "q" (new),
+           "m" (*(U16 *)ptr)
+         : "cc" );
+ return code;
+}
+
 #define cmpxchg4(x,y,z) cmpxchg4_i686(x,y,z)
 inline BYTE cmpxchg4_i686(U32 *old, U32 new, void *ptr) {
  BYTE code;
@@ -357,6 +379,23 @@ inline BYTE cmpxchg1_amd64(BYTE *old, BYTE new, void *ptr) {
  BYTE *ptr_data=ptr;
  __asm__ __volatile__ (
          "lock;   cmpxchgb %b2,%4\n\t"
+         "setnz   %b0\n\t"
+         : "=q"(code), "=a"(*old)
+         : "q"(new),
+           "1"(*old),
+           "m"(*ptr_data)
+         : "cc");
+ return code;
+}
+
+#define cmpxchg2(x,y,z) cmpxchg2_amd64(x,y,z)
+inline BYTE cmpxchg2_amd64(U16 *old, U16 new, void *ptr) {
+ /* values passed in guest big-endian format */
+ /* returns 0 on success otherwise returns 1 */
+ BYTE code;
+ U16 *ptr_data=ptr;
+ __asm__ __volatile__ (
+         "lock;   cmpxchgw %w2,%4\n\t"
          "setnz   %b0\n\t"
          : "=q"(code), "=a"(*old)
          : "q"(new),
@@ -610,6 +649,17 @@ inline BYTE cmpxchg1_C11(BYTE *old, BYTE new, volatile void *ptr) {
         }
 #endif
 
+#if defined( cmpxchg2 ) && !defined( C11_ATOMICS_ASSISTS_NOT_PREFERRED )
+  #undef cmpxchg2
+#endif
+#ifndef cmpxchg2
+#define cmpxchg2(x,y,z) cmpxchg2_C11(x,y,z)
+inline BYTE cmpxchg2_C11(U16 *old, U16 new, volatile void *ptr) {
+/* returns 0 on success otherwise returns 1 */
+            return __atomic_compare_exchange_n ((volatile U16 *)ptr, old, new, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 0 : 1;
+        }
+#endif
+
 #if defined( cmpxchg4 ) && !defined( C11_ATOMICS_ASSISTS_NOT_PREFERRED )
   #undef cmpxchg4
 #endif
@@ -666,6 +716,10 @@ inline void store_dw_e2k_noswap ( volatile void* ptr, U64 value )
  #define ASSIST_CMPXCHG1
 #endif
 
+#if defined(cmpxchg2)
+ #define ASSIST_CMPXCHG2
+#endif
+
 #if defined(cmpxchg4)
  #define ASSIST_CMPXCHG4
 #endif
@@ -695,6 +749,7 @@ inline void store_dw_e2k_noswap ( volatile void* ptr, U64 value )
 #if (! defined( MAINLOCK_ALWAYS )) \
     && defined( H_ATOMIC_OP )      \
     && defined( cmpxchg1 )         \
+    && defined( cmpxchg2 )         \
     && defined( cmpxchg4 )         \
     && defined( cmpxchg8 )         \
     && defined( cmpxchg16 )
@@ -890,6 +945,28 @@ inline BYTE cmpxchg1(BYTE *old, BYTE new, volatile void *ptr) {
  else
  {
      *old = *(BYTE *)ptr;
+     code = 1;
+ }
+ return code;
+}
+#endif
+
+/*-------------------------------------------------------------------
+ * cmpxchg2
+ *-------------------------------------------------------------------*/
+#ifndef cmpxchg2
+inline BYTE cmpxchg2(U16 *old, U16 new, volatile void *ptr) {
+ /* values passed in guest big-endian format */
+ /* returns 0 on success otherwise returns 1 */
+ BYTE code;
+ if (*old == *(U16 *)ptr)
+ {
+     *(U16 *)ptr = new;
+     code = 0;
+ }
+ else
+ {
+     *old = *(U16 *)ptr;
      code = 1;
  }
  return code;
