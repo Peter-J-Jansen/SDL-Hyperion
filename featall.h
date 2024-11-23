@@ -1,5 +1,5 @@
 /* FEATALL.H    (C) Copyright Jan Jaeger, 2000-2012                  */
-/*              (C) and others 2013-2023                             */
+/*              (C) and others 2013-2024                             */
 /*              Architecture-dependent macro definitions             */
 /*                                                                   */
 /*   Released under "The Q Public License Version 1"                 */
@@ -51,6 +51,17 @@
 #define OPTION_NOASYNC_SF_CMDS          // Bypass bug in cache logic
                                         // (see GitHub Issue #618!)
 
+#define TXF_BACKOUT_METHOD              // TXF alternative implementation
+#define TXF_COMMIT_METHOD               // TXF original implementation
+
+#if  defined( TXF_NO_BACKOUT_METHOD ) && defined( TXF_NO_COMMIT_METHOD )
+  #error Both TXF_NO_BACKOUT_METHOD and TXF_NO_COMMIT_METHOD are specified, the latter will be ignored.
+  #undef          TXF_COMMIT_METHOD
+#elif defined( TXF_NO_COMMIT_METHOD )
+  #undef          TXF_COMMIT_METHOD
+#elif defined( TXF_NO_BACKOUT_METHOD )
+  #undef          TXF_BACKOUT_METHOD
+#endif
 /*-------------------------------------------------------------------*/
 /*              Normal default OPTIONs and FEATUREs                  */
 /*-------------------------------------------------------------------*/
