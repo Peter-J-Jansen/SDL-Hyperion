@@ -1,5 +1,5 @@
 /* OPCODE.H     (C) Copyright Jan Jaeger, 2000-2012                  */
-/*              (C) and others 2013-2023                             */
+/*              (C) and others 2013-2024                             */
 /*              Instruction decoding macros and prototypes           */
 /*                                                                   */
 /*   Released under "The Q Public License Version 1"                 */
@@ -2280,6 +2280,22 @@ do {                                                                  \
 
 #else /* defined( FEATURE_073_TRANSACT_EXEC_FACILITY ) */
 
+#if defined( TXF_NO_CHECKS )
+  #define TXFC_INSTR_CHECK( _regs )
+  #define TXFC_INSTR_CHECK_IP( _regs )
+  #define TXFC_BRANCH_CHECK_IP( _regs, _m3, _i4 )
+  #define TXFC_RELATIVE_BRANCH_CHECK_IP( _regs )
+
+  #define TXF_INSTR_CHECK( _regs )
+  #define TXF_FLOAT_INSTR_CHECK( _regs )
+  #define TXF_ACCESS_INSTR_CHECK( _regs )
+  #define TXF_MISC_INSTR_CHECK( _regs )
+  #define TXF_NONRELATIVE_BRANCH_CHECK_IP( _regs, _r )
+  #define TXF_BRANCH_SET_MODE_CHECK_IP( _regs, _r2 )
+  #define TXF_SET_ADDRESSING_MODE_CHECK( _regs )
+  #define TXF_EXECUTE_INSTR_CHECK( _regs )
+#else /* !defined( TXF_NO_CHECKS ) */
+
   #define TXFC_INSTR_CHECK( _regs )                                                     \
     /* Restricted instruction in CONSTRAINED transaction mode */                        \
     do {                                                                                \
@@ -2447,6 +2463,8 @@ do {                                                                  \
         ARCH_DEP( program_interrupt )( (_regs), PGM_EXECUTE_EXCEPTION );                \
       }                                                                                 \
     } while (0)
+
+#endif /* !defined( TXF_NO_CHECKS ) */
 
   #define TXF_MADDRL(   _vaddr,   _len,   _arn,   _regs,   _acctype,   _maddr  )        \
           txf_maddr_l( (_vaddr), (_len), (_arn), (_regs), (_acctype), (_maddr) )

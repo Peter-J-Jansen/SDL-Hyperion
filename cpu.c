@@ -1,6 +1,6 @@
 /* CPU.C        (C) Copyright Roger Bowler, 1994-2012                */
 /*              (C) Copyright Jan Jaeger, 1999-2012                  */
-/*              (C) and others 2013-2023                             */
+/*              (C) and others 2013-20234                            */
 /*              ESA/390 CPU Emulator                                 */
 /*                                                                   */
 /*   Released under "The Q Public License Version 1"                 */
@@ -2079,9 +2079,11 @@ int     aswitch;
     //--------------------------------------------------------------
 
 #if defined( FEATURE_073_TRANSACT_EXEC_FACILITY )
+  #if !defined( TXF_NO_CHECKS ) 
     if (FACILITY_ENABLED( 073_TRANSACT_EXEC, regs ))
         if (regs->CR(0) & CR0_TXC)
             goto txf_facility_loop;
+  #endif /* !defined( TXF_NO_CHECKS ) */             
 #endif
 
 fastest_no_txf_loop:

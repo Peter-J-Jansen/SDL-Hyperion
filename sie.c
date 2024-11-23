@@ -1202,8 +1202,10 @@ sie_fetch_instruction:
                 //--------------------------------------------------------------
 
 #if defined( FEATURE_073_TRANSACT_EXEC_FACILITY )
+  #if !defined( TXF_NO_CHECKS )
                 if (FACILITY_ENABLED( 073_TRANSACT_EXEC, GUESTREGS ))
                     goto txf_facility_loop;
+  #endif /* !defined( TXF_NO_CHECKS ) */                      
 #endif
 
 //fastest_no_txf_loop:
