@@ -1,5 +1,5 @@
 /* TRANSACT.H   (C) Copyright Bob Wood, 2019-2020                    */
-/*              (C) and others 2020-2021                             */
+/*              (C) and others 2020-2024                             */
 /*                  Transactional-Execution consts and structs       */
 /*                                                                   */
 /*   Released under "The Q Public License Version 1"                 */
@@ -24,6 +24,12 @@
 #define  MAX_TXF_CONTRAN_INSTR   32   /* Max CONSTRAINED instr.      */
 #define  MAX_TXF_PAGES         1024   /* Max num of modified pages   */
                                       /* (z15 = 4MB L2 Data Cache )  */
+
+#if defined( TXF_BACKOUT_METHOD )
+  #define TXF_BACKOUT_CACHE_LINES_MAX 1024       /* Arbitrary number */
+  #define ZCACHE_LINE_ADDRMASK        0xFFFFFFFFFFFFFF00ULL
+  #define ZCACHE_LINE_MASK            0xFF
+#endif /* defined( TXF_BACKOUT_METHOD ) */
 
 #define  ZPAGEFRAME_PAGESIZE   4096   /* IBM z page size (4K)        */
 #define  ZPAGEFRAME_BYTEMASK   0x00000FFF
@@ -80,6 +86,37 @@ struct TPAGEMAP
 #define CM_STORED   2           /* cache line was stored into        */
 };
 typedef struct TPAGEMAP  TPAGEMAP;   // Transaction Page Map table
+
+#if defined( TXF_BACKOUT_METHOD )
+
+/*-------------------------------------------------------------------*/
+/*                Transaction Backout Cache Lines                    */
+/*-------------------------------------------------------------------*/
+struct TXF_BACKOUT_CACHE_LINES
+{
+    BYTE*   maddr;              /* -> cache line to be restored when backout needed */
+    BYTE*   backout_cache_line; /* -> saved cache line prior to transaction access  */
+};
+typedef struct TXF_BACKOUT_CACHE_LINES TXF_BACKOUT_CACHE_LINES;
+
+  #define TXF_CACHE_LINE_STATUS_SIZE                                                          \
+        ( sysblk.mainsize / ( ZCACHE_LINE_SIZE / sizeof( sysblk.txf_cache_line_status[ 0 ] ) ) )  
+  #define TXF_CACHE_LINES_COUNT( maddr, len )                                                 \
+        ( 1 + ( ( ( (U64) (maddr) & ZCACHE_LINE_MASK ) + (len) - 1 ) >> ZCACHE_LINE_SHIFT ) ) 
+  #define TXF_CACHE_LINES_STATUS_INDEX( maddr )                                               \
+        ( ( (U64) ( (maddr) - sysblk.mainstor ) ) >> ZCACHE_LINE_SHIFT )
+  #define TXF_CACHE_LINE_STATUS( maddr )                                                      \
+        ( sysblk.txf_cache_line_status[ TXF_CACHE_LINES_STATUS_INDEX( (maddr) ) ] )
+  #define TXF_CACHE_LINE_IS_STORED( maddr )                                                   \
+        ( TXF_CACHE_LINE_STATUS( (maddr) ) & TXF_CACHE_LINE_STORED )
+  #define TXF_CACHE_LINE_IS_FETCHED( maddr )                                                  \
+        ( TXF_CACHE_LINE_STATUS( (maddr) ) & TXF_CACHE_LINE_FETCHED )
+  #define TXF_CACHE_LINE_CPU( maddr )                                                        \
+        ( TXF_CACHE_LINE_STATUS( (maddr) ) & TXF_CACHE_LINE_CPU_MASK )
+  #define TXF_CACHE_LINE_REGS( maddr )                                                        \
+        ( sysblk.regs[ TXF_CACHE_LINE_CPU( (maddr) ) ] )
+
+#endif /* defined( TXF_BACKOUT_METHOD ) */
 
 /*-------------------------------------------------------------------*/
 /*                  txf_maddr_l acctype values                       */
