@@ -1,5 +1,5 @@
 /* DAT.H        (C) Copyright Roger Bowler, 1999-2012                */
-/*              (C) and others 2013-2021                             */
+/*              (C) and others 2013-2024                             */
 /*              Dynamic Address Translation                          */
 /*                                                                   */
 /*   Released under "The Q Public License Version 1"                 */
@@ -372,7 +372,257 @@ inline BYTE* ARCH_DEP( maddr_l )
 #if defined( FEATURE_073_TRANSACT_EXEC_FACILITY )
     if (FACILITY_ENABLED( 073_TRANSACT_EXEC, regs ))
     {
+
+  #if defined( TXF_BACKOUT_METHOD )
+
+        U16   txf_backout_cache_lines_count_old;
+        U16   txf_backout_cache_lines_count_locked;
+        U16   txf_backout_cache_lines_count_new;
+        U16   txf_cache_line_status_old;
+        U16   txf_cache_line_status_initial;            
+        BYTE *maddr_next;
+        int   i;
+
+        // First we handle the case of transactional accesses.
+        /*  SA22-7832-12 Principles of Operation, page 5-99:
+            SA22-7832-13 Principles of Operation, page 5-100:
+
+            "Storage accesses for instruction and DAT- and ART-
+                table fetches follow the non-transactional rules."
+        */
+        if ( 1
+            && arn != USE_INST_SPACE    /* Not instruction fetching */
+            && arn != USE_REAL_ADDR     /* Not a DAT- or ART access */
+            && regs                     /* Only CPU access possible */             
+            && regs->txf_tnd            /* transactional access     */      
+            && !regs->txf_NTSTG )       /* not a NTSTG instruction  */ 
+        { 
+  #if !defined( TXF_COMMIT_METHOD )
+            /* Check if our transaction has already been aborted, e.g. txf_abort_all( ) */
+            
+            if (regs->txf_tac)
+            {
+                PTT_TXF( "*TXF mad TAC", regs->txf_tac, regs->txf_contran, regs->txf_tnd );
+                if (!(regs->txf_why & TXF_WHY_DELAYED_ABORT))
+                {
+                    regs->txf_why  |=  TXF_WHY_DELAYED_ABORT;
+                    regs->txf_who   =  regs->cpuad;
+                    regs->txf_loc   =  TRIMLOC( PTT_LOC );
+                }
+                ABORT_TRANS( regs, ABORT_RETRY_CC, regs->txf_tac );
+                UNREACHABLE_CODE( return maddr );
+            }
+  #endif                    
+
+#define HHC17740 "TXF %d transcpus, maddr=0x%16.16"PRIX64", len=%lu, %s page %lu cache lines access attempts" 
+#if 0 /* PJJ : suppress HHC17740S's */     
+            // Transactional accesses very seldom span more than one cache line, contraint ones    
+            // were never observed with more than one; the much less frequent non-constrained  
+            // ones were observed with a maximum of just 2 cache lines.  But the PoP allows
+            // more than one.  The message below can be enabled to observe this.         
+            if ( ( len != 1) && ( TXF_CACHE_LINES_COUNT( maddr, len ) != 1 ) )                      
+            {  
+#define                HHC17740 "TXF %d transcpus, maddr=0x%16.16"PRIX64", len=%lu, %s page %lu cache lines access attempts"                                                                                                                                                       
+                WRMSG( HHC17740, "S", sysblk.txf_transcpus, (U64) maddr, len, "same" , TXF_CACHE_LINES_COUNT( maddr, len ) );  
+            }
+#endif /* PJJ : suppress HHC17740S's */              
+
+            // Correct processing of transactional accesses requires the following actions sequence:
+            // 1. Acquire the TXF_CACHE_LINE_LOCK ensuring our transaction's exclusive use delaying
+            //    other possible users and obtain the txf_backout_cache_line_count at the same time.
+            //
+            //    If our lock acquisition fails, the lock is already taken, so a backout abort operation 
+            //    is already in progress waiting for a delayed abort, which we will need to act upon with
+            //    txf_backout_abort_cache_lines(... _IMMEDIATE), like for transactional access conflicts.  
+            txf_backout_cache_lines_count_old = 
+                regs->txf_backout_cache_lines_count & ( ~TXF_CACHE_LINE_LOCK );
+            txf_backout_cache_lines_count_new = txf_backout_cache_lines_count_old;
+            txf_backout_cache_lines_count_locked =
+                ( txf_backout_cache_lines_count_old + 1 ) | TXF_CACHE_LINE_LOCK; 
+            if ( !cmpxchg2( &txf_backout_cache_lines_count_old,
+                             txf_backout_cache_lines_count_locked, 
+                      &regs->txf_backout_cache_lines_count ) )
+            {  
+
+                // For each of the cache lines being accessed in this transaction ...        
+                for ( i = 0, maddr_next = maddr; 
+                      i < (int) TXF_CACHE_LINES_COUNT( maddr, len ); 
+                      i++,   maddr_next += ZCACHE_LINE_SIZE )
+                {
+
+                    // 2. Updating our cache line's status, i.e. fetched or stored. 
+                    //    We can only update the cache line's status if it's not in use 
+                    //    yet, or only in use by the transaction of our own CPU. 
+                    if ( TXF_ACCTYPE( acctype ) & ACC_WRITE )
+                        txf_cache_line_status_initial = ( TXF_CACHE_LINE_STORED | regs->cpuad );
+                    else
+                        txf_cache_line_status_initial = ( TXF_CACHE_LINE_FETCHED | regs->cpuad );
+                    txf_cache_line_status_old = TXF_CACHE_LINE_NOT_USED;   
+                    if ( 0 
+                        || !cmpxchg2( &txf_cache_line_status_old,
+                                       txf_cache_line_status_initial,
+                                      &TXF_CACHE_LINE_STATUS( maddr_next ) ) 
+                        || ( txf_cache_line_status_old & TXF_CACHE_LINE_CPU_MASK ) == regs->cpuad )                                    
+                    {
+                        if ( txf_cache_line_status_old == TXF_CACHE_LINE_NOT_USED )
+                        {    
+
+                            //    OK, the cache line was not in use yet, so :
+                            // 3. Saving the cache line for possible future backout in txf_backout_cache_line[ ].backout_cache_line
+                            // 4. Storing the cache line maddr_next in txf_backout_cache_line[ ].maddr                    
+                            //    Saving the cache line for possible future backout purposes includes NULLing the next .maddr 
+                            //    and incrementing the txf_backout_cache_lines_count_new from the old one.
+                            memcpy( regs->txf_backout_cache_lines[ txf_backout_cache_lines_count_new ].backout_cache_line,    
+                                (BYTE *) ( (U64) maddr_next & ZCACHE_LINE_ADDRMASK ), ZCACHE_LINE_SIZE );
+                            regs->txf_backout_cache_lines[   txf_backout_cache_lines_count_new ].maddr = 
+                                (BYTE *) ( (U64) maddr_next & ZCACHE_LINE_ADDRMASK );   
+                            regs->txf_backout_cache_lines[ ++txf_backout_cache_lines_count_new ].maddr = NULL;
+                            if ( sysblk.txf_cache_line_maddr_lo )
+                            { 
+                                sysblk.txf_cache_line_maddr_lo = MIN( sysblk.txf_cache_line_maddr_lo, maddr_next );  
+                                sysblk.txf_cache_line_maddr_hi = MAX( sysblk.txf_cache_line_maddr_hi, maddr_next ); 
+                            }
+                            else
+                            { 
+                                sysblk.txf_cache_line_maddr_lo = maddr_next;  
+                                sysblk.txf_cache_line_maddr_hi = maddr_next; 
+                            } 
+
+                            // When we'd have to backout a transactionally stored cache line, we'd have no chance
+                            // to perform a correct STORKEY backout, so we ensure it isn't needed, which it actually
+                            // never is, so this code can be safely disabled; we've never seen the message.
+                            BYTE storkey_bits = ARCH_DEP( get_storage_key )( (U64) ( ( maddr_next ) - sysblk.mainstor ) )
+                                               & ( STORKEY_REF | STORKEY_CHANGE );
+                            if ( storkey_bits != ( STORKEY_REF | STORKEY_CHANGE ) )
+                            {
+#define                                HHC17750 "TXF %d transcpus, maddr=0x%16.16"PRIX64", storkey_bits=%02X"                                                                                                                                                       
+                                WRMSG( HHC17750, "W", sysblk.txf_transcpus, (U64) maddr, storkey_bits );
+                                ARCH_DEP( or_storage_key )( (U64) ( ( maddr_next ) - sysblk.mainstor ),
+                                                 ( STORKEY_REF | STORKEY_CHANGE ) );    
+                            }      
+
+                            //    We  check there is sill room for additional txf_backout_cache_lines. 
+                            if ( txf_backout_cache_lines_count_new >= TXF_BACKOUT_CACHE_LINES_MAX )
+                            {  
+                                if ( TXF_ACCTYPE( acctype ) & ACC_WRITE )
+                                    regs->txf_backout_tac = TAC_STORE_OVF;
+                                else
+                                    regs->txf_backout_tac = TAC_FETCH_OVF;                             
+                            }
+                        }        
+                        else
+                        {
+
+                            // 5. A cache line in use by our own CPU's transaction may need to update the stored status.
+                            if ( TXF_ACCTYPE( acctype ) & ACC_WRITE )
+                                TXF_CACHE_LINE_STATUS( maddr_next ) = txf_cache_line_status_initial;     
+                        }
+                    }
+            
+                    // When the cache line was already in use in another transaction then we need to abort ours.
+
+                    // SA22-7832-12 z/Architecture - Principles of Operation, pg 5-100 (top right),
+                    // states "A fetch-conflict / store-conflict condition is detected when another
+                    // CPU or the channel subsystem attempts to store / access a location that has been
+                    // transactionally fetched / stored by this CPU".  The transaction by this CPU then
+                    // needs to be aborted.  This implies that the first transaction should be aborted.
+                    // However, in the case of two CPU's executing a transaction, it is not predicatable
+                    // which of the conflicting ones started first, so we take the liberty to abort the
+                    // the second starter, and not the first one.  We also believe this lowers the
+                    // number of transaction retries.                    
+                    else
+                    {  
+                        if ( TXF_ACCTYPE( acctype ) & ACC_WRITE )
+                            regs->txf_backout_tac = TAC_STORE_CNF;
+                        else
+                            regs->txf_backout_tac = TAC_FETCH_CNF;                                                                         
+                    } 
+                }                 
+
+                // 6. All of our cache line updates completed we need to unlock the transaction's cache line,
+                //    and at the same time replace the txf_backout_cache_lines_count_old with the new one,
+                //    noting that we already incremented and locked the count to avoid a zero-count locked state
+                //    as this is allowed exclusively to mark a cache line as backed out awaiting delayed abort.   
+// tested OK // i = 3 ;
+// tested OK // while ( i-- && 
+                while ( cmpxchg2( &txf_backout_cache_lines_count_locked,
+                                   txf_backout_cache_lines_count_new, 
+                            &regs->txf_backout_cache_lines_count ) )
+                {
+#define                    HHC17743 "TXF: %s%02X: %s%s internal logic error : cache line exclusive update violated"
+                    WRMSG( HHC17743, "S", TXF_CPUAD( regs ), TXF_QSIE( regs ), TXF_CONSTRAINED( regs->txf_contran ) );
+                } 
+            } 
+            // The transaction's cache line now being unlocked, we are done, except if a backout abort code
+            // has been set, in which case we have to backout the transaction store accesses and abort. 
+            if ( regs->txf_backout_tac )
+            { 
+                regs->txf_who = regs->cpuad; 
+                regs->txf_why |= TXF_WHY_CONFLICT;                 
+                regs->txf_loc = TRIMLOC( PTT_LOC );                     
+                txf_backout_abort_cache_lines( regs, TXF_BACKOUT_ABORT_IMMEDIATE);
+            }          
+        } /* regs->txf_tnd != 0 */
+
+        // Non-transactional access is only allowed for non-conflict cases.  Otherwise
+        // the cache line needs to be backed out first (and the transaction aborted,
+        // which will be a delayed abort), prior to allowing the access to take place.
+        else if ( sysblk.txf_cache_line_maddr_lo && ( len > 0 ) )
+        {
+            if ( ( len == 1)  || ( TXF_CACHE_LINES_COUNT( maddr, len ) == 1 ) )                      
+                maddr_next = maddr;
+            else 
+            { 
+                maddr_next = MAX( maddr, sysblk.txf_cache_line_maddr_lo ); 
+
+#if 0 /* PJJ : suppress HHC17740I's */
+                if ( ( len != 1) && ( TXF_CACHE_LINES_COUNT( maddr, len ) > 1 ) )                      
+                {  
+                    if (   ( maddr           <= sysblk.txf_cache_line_maddr_hi )    
+                        && ( maddr + len - 1 >= sysblk.txf_cache_line_maddr_lo ) ) 
+                    {          
+                        if ( ( ( ( (U64) (maddr) & 0x0FFF ) + (len) - 1 ) >> 12 ) > 0 ) /* 4K page boundary crossed */  
+                        {                                                                                                                                                               
+                            WRMSG( HHC17740, "I", sysblk.txf_transcpus, (U64) maddr, len, "multiple", TXF_CACHE_LINES_COUNT( maddr, len ) );  
+                        }
+                        else if ( ( len != 1) && ( TXF_CACHE_LINES_COUNT( maddr, len ) > 2 ) )                      
+                        {                                                                                                                                           
+                            WRMSG( HHC17740, "I", sysblk.txf_transcpus, (U64) maddr, len, "same", TXF_CACHE_LINES_COUNT( maddr, len ) );  
+                        }
+                    }      
+                } 
+#endif /* PJJ : suppress HHC17740I's */                
+                
+            }                    
+            do      
+            {      
+                // A conflict exists when accessing an already stored cache line,
+                // or when writing into an already fetched cache line.
+                if (0    
+                    || ( TXF_CACHE_LINE_IS_STORED(  maddr_next ) )
+                    || ( TXF_CACHE_LINE_IS_FETCHED( maddr_next ) && ( TXF_ACCTYPE( acctype ) & ACC_WRITE ) ) ) 
+                {
+                    REGS *tregs = TXF_CACHE_LINE_REGS( maddr_next );
+                    if ( TXF_CACHE_LINE_IS_STORED(  maddr_next ) )
+                        tregs->txf_backout_tac = TAC_STORE_CNF;
+                    else
+                        tregs->txf_backout_tac = TAC_FETCH_CNF;
+                    tregs->txf_who  = regs->cpuad; 
+                    tregs->txf_why |= TXF_WHY_DELAYED_ABORT | TXF_WHY_CONFLICT;  
+                    tregs->txf_loc  = TRIMLOC( PTT_LOC );                      
+                    txf_backout_abort_cache_lines( tregs, TXF_BACKOUT_ABORT_DELAYED ); /* NTRANS CNF */                    
+                } 
+                maddr_next += ZCACHE_LINE_SIZE;    
+            }
+            while ( maddr_next <= MIN( maddr + len - 1, sysblk.txf_cache_line_maddr_hi ) );      
+        } 
+
+  #endif /* defined( TXF_BACKOUT_METHOD ) */
+
+  #if defined( TXF_COMMIT_METHOD )
+
         /* SA22-7832-12 Principles of Operation, page 5-99:
+           SA22-7832-13 Principles of Operation, page 5-100:
 
              "Storage accesses for instruction and DAT- and ART-
               table fetches follow the non-transactional rules."
@@ -394,6 +644,9 @@ inline BYTE* ARCH_DEP( maddr_l )
 
         /* Translate to alternate TXF address */
         maddr = TXF_MADDRL( addr, len, arn, regs, acctype, maddr );
+
+  #endif /* defined( TXF_COMMIT_METHOD ) */
+
     }
 #endif
 
