@@ -1,5 +1,5 @@
 /* VERSION.C    (C) Copyright Roger Bowler, 1999-2012                */
-/*              (C) and others 2013-2021                             */
+/*              (C) and others 2013-2024                             */
 /*              Hercules Version Display Module                      */
 /*                                                                   */
 /*   Released under "The Q Public License Version 1"                 */
@@ -703,7 +703,11 @@ static const char *build_info[] = {
     "Without \"Optimized\" instructions",
 #endif
 
-
+#if defined( PJJ_OPTIMIZATIONS ) 
+    "With    PJJ_OPTIMIZATIONS",
+#else
+    "Without PJJ_OPTIMIZATIONS",
+#endif
 
 
 //---------------------------------------------------------------------
@@ -742,6 +746,7 @@ static const char *build_info[] = {
     "Machine dependent assists:"
 
 #if !defined( ASSIST_CMPXCHG1  ) \
+ && !defined( ASSIST_CMPXCHG2  ) \
  && !defined( ASSIST_CMPXCHG4  ) \
  && !defined( ASSIST_CMPXCHG8  ) \
  && !defined( ASSIST_CMPXCHG16 ) \
@@ -753,6 +758,9 @@ static const char *build_info[] = {
   #if defined( ASSIST_CMPXCHG1 )
                     " cmpxchg1"
   #endif
+  #if defined( ASSIST_CMPXCHG2 )
+                    " cmpxchg2"
+  #endif  
   #if defined( ASSIST_CMPXCHG4 )
                     " cmpxchg4"
   #endif
