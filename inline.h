@@ -1,6 +1,6 @@
 /* INLINE.H     (C) Copyright Jan Jaeger, 1999-2012                  */
 /*              (C) Copyright Roger Bowler, 1999-2012                */
-/*              (C) and others 2013-2022                             */
+/*              (C) and others 2013-2024                             */
 /*              Inline function definitions                          */
 /*                                                                   */
 /*   Released under "The Q Public License Version 1"                 */
@@ -63,6 +63,7 @@ inline int sub_logical( U32* result, U32 op1, U32 op2 )
 /*-------------------------------------------------------------------*/
 inline int add_signed( U32* result, U32 op1, U32 op2 )
 {
+#if !defined( PJJ_OPTIMIZATIONS )    
     S32 sres, sop1, sop2;
 
     /* NOTE: cannot use casting here as signed fixed point overflow
@@ -80,6 +81,66 @@ inline int add_signed( U32* result, U32 op1, U32 op2 )
         || (sop2 < 0 && sop1 < (INT_MIN - sop2))
     )
     ? 3 : (sres < 0 ? 1 : (sres > 0 ? 2 : 0));
+#else /* defined( PJJ_OPTIMIZATIONS ) */
+
+  #define EPILOGUE_ADD_SUB_X86_64          /* FLAGS -> CC; I/O and clobber lists; return CC      */ \
+             "movl $2, %[CC]         \n\t" /* Assume resulting CC = 2 (positive)                 */ \
+             "jo   3f                \n\t" /* If OF==1 go setting CC = 3 (overflow)              */ \
+             "jz   0f                \n\t" /* If ZF==1 go setting CC = 0 (zero)                  */ \
+             "jns  4f                \n\t" /* If SF==0 then we're DONE, CC = 2 (positive) was OK */ \
+             "movl $1, %[CC]         \n\t" /* As SF==1 we set CC = 1 (negative)                  */ \
+             "jmp  4f                \n\t" /* And we're DONE                                     */ \
+          "0: movl $0, %[CC]         \n\t" /* Set CC = 0 (zero)                                  */ \
+             "jmp  4f                \n\t" /* And we're DONE                                     */ \
+          "3: movl $3, %[CC]         \n\t" /* Set CC = 3 (overflow)                              */ \
+          "4:                        \n\t" /* And we're DONE                                     */ \
+                                                                                                    \
+             : [result] "+m" (*result), [CC] "=r" (CC)                                              \
+             : [op1] "r" (op1), [op2] "r" (op2)                                                     \
+             : "cc"                                                                                 \
+             ) ;                                                                                    \
+    return CC ;  
+
+  #define EPILOGUE_ADD_SUB_S390X           /* op1 -> result; I/O and clobber lists; return CC    */ \
+             "st   %[op1],%[result]  \n\t" /* result = op1                                       */ \
+             "ipm  %[CC]             \n\t" /* CC = CC and PM from PSW                            */ \
+             "srl  %[CC],28          \n\t" /* CC right justified                                 */ \
+                                                                                                    \
+             : [op1] "+r" (op1), [result] "=m" (*result), [CC] "=d" (CC)                            \
+             : [op2] "r" (op2)                                                                      \
+             : "cc"                                                                                 \
+             ) ;                                                                                    \
+    return CC ;
+
+ #define EPILOGUE_ADD_SUB_OTHER_RETURN_CC /* return CC based on sign bits of op1, op2 and result */ \
+    return  ((S32)*result >  0) ?                                                                   \
+                ((S32)op1 <  0 && (S32)op2 <  0) ? 3 : 2 :                                          \
+            ((S32)*result <  0) ?                                                                   \
+                ((S32)op1 >= 0 && (S32)op2 >= 0) ? 3 : 1 :                                          \
+                ((S32)op1 <  0 && (S32)op2 <  0) ? 3 : 0;                                            
+
+  #if defined(__x86_64__)
+
+    int CC ;
+    __asm__ (
+             "movl %[op1], %[result] \n\t" // result = op1
+             "addl %[op2], %[result] \n\t" // result = result + op2
+    EPILOGUE_ADD_SUB_X86_64
+
+  #elif defined(__s390x__)
+
+    int CC ;
+    __asm__ (
+             "ar   %[op1],%[op2]     \n\t" // op1 = op1 + op2
+    EPILOGUE_ADD_SUB_S390X 
+
+  #else
+
+    *result = op1 + op2;
+    EPILOGUE_ADD_SUB_OTHER_RETURN_CC
+
+  #endif
+#endif /* defined( PJJ_OPTIMIZATIONS ) */      
 }
 
 /*-------------------------------------------------------------------*/
@@ -88,6 +149,7 @@ inline int add_signed( U32* result, U32 op1, U32 op2 )
 /*-------------------------------------------------------------------*/
 inline int sub_signed( U32* result, U32 op1, U32 op2 )
 {
+#if !defined( PJJ_OPTIMIZATIONS ) 
     S32 sres, sop1, sop2;
 
     /* NOTE: cannot use casting here as signed fixed point overflow
@@ -105,6 +167,28 @@ inline int sub_signed( U32* result, U32 op1, U32 op2 )
         || (sop2 > 0 && sop1 < (INT_MIN + sop2))
     )
     ? 3 : (sres < 0 ? 1 : (sres > 0 ? 2 : 0));
+#else /* defined( PJJ_OPTIMIZATIONS ) */ 
+  #if defined(__x86_64__)
+
+    int CC ;
+    __asm__ (
+             "movl %[op1], %[result] \n\t" // result = op1
+             "subl %[op2], %[result] \n\t" // result = result - op2
+    EPILOGUE_ADD_SUB_X86_64
+
+  #elif defined(__s390x__)
+
+    int CC ;
+    __asm__ (
+             "sr   %[op1],%[op2]     \n\t" // op1 = op1 - op2
+    EPILOGUE_ADD_SUB_S390X   
+
+  #else
+    *result = op1 - op2;
+    EPILOGUE_ADD_SUB_OTHER_RETURN_CC
+
+  #endif
+#endif /* defined( PJJ_OPTIMIZATIONS ) */       
 }
 
 /*-------------------------------------------------------------------*/
@@ -226,6 +310,7 @@ inline int sub_logical_long( U64* result, U64 op1, U64 op2 )
 /*-------------------------------------------------------------------*/
 inline int add_signed_long( U64* result, U64 op1, U64 op2 )
 {
+#if !defined( PJJ_OPTIMIZATIONS ) 
     S64 sres, sop1, sop2;
 
     /* NOTE: cannot use casting here as signed fixed point overflow
@@ -243,6 +328,29 @@ inline int add_signed_long( U64* result, U64 op1, U64 op2 )
         || (sop2 < 0 && sop1 < (LLONG_MIN - sop2))
     )
     ? 3 : (sres < 0 ? 1 : (sres > 0 ? 2 : 0));
+#else /* defined( PJJ_OPTIMIZATIONS ) */ 
+  #if defined(__x86_64__)
+
+    int CC ;
+    __asm__ (
+             "movq %[op1], %[result] \n\t" // result = op1
+             "addq %[op2], %[result] \n\t" // result = result + op2
+    EPILOGUE_ADD_SUB_X86_64
+
+  #elif defined(__s390x__)
+
+    int CC ;
+    __asm__ (
+             "agr   %[op1],%[op2]    \n\t" // op1 = op1 + op2
+    EPILOGUE_ADD_SUB_S390X
+
+  #else
+
+    *result = op1 + op2;
+    EPILOGUE_ADD_SUB_OTHER_RETURN_CC
+
+  #endif
+#endif /* defined( PJJ_OPTIMIZATIONS ) */      
 }
 
 /*-------------------------------------------------------------------*/
@@ -251,6 +359,7 @@ inline int add_signed_long( U64* result, U64 op1, U64 op2 )
 /*-------------------------------------------------------------------*/
 inline int sub_signed_long( U64* result, U64 op1, U64 op2 )
 {
+#if !defined( PJJ_OPTIMIZATIONS )     
     S64 sres, sop1, sop2;
 
     /* NOTE: cannot use casting here as signed fixed point overflow
@@ -268,6 +377,29 @@ inline int sub_signed_long( U64* result, U64 op1, U64 op2 )
         || (sop2 > 0 && sop1 < (LLONG_MIN + sop2))
     )
     ? 3 : (sres < 0 ? 1 : (sres > 0 ? 2 : 0));
+#else /* defined( PJJ_OPTIMIZATIONS ) */ 
+  #if defined(__x86_64__)
+
+    int CC ;
+    __asm__(
+            "movq %[op1], %[result] \n\t" // result = op1
+            "subq %[op2], %[result] \n\t" // result = result - op2
+    EPILOGUE_ADD_SUB_X86_64
+
+  #elif defined(__s390x__)
+
+    int CC ;
+    __asm__ (
+             "sgr   %[op1],%[op2]    \n\t" // op1 = op1 - op2
+    EPILOGUE_ADD_SUB_S390X
+
+  #else
+  
+    *result = op1 - op2;
+    EPILOGUE_ADD_SUB_OTHER_RETURN_CC
+
+  #endif
+#endif /* defined( PJJ_OPTIMIZATIONS ) */      
 }
 
 /*-------------------------------------------------------------------*/
